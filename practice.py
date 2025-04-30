@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import openai
+from openai import Openai
 
 st.set_page_config(page_title="GPT-4.1 Mini Chat", layout="centered")
 
