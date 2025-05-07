@@ -1,5 +1,3 @@
-!pip install PyPDF2
-
 import streamlit as st
 import openai
 import PyPDF2
