@@ -4,13 +4,13 @@ import PyPDF2
 import tempfile
 import os
 
-page = st.sidebar.radio("페이지 선택", ["질문하기", "Chat", "도서관 챗봇", "ChatPDF"])
-
 # ChatPDF용 전역 세션 상태
 if "pdf_store_id" not in st.session_state:
     st.session_state.pdf_store_id = None
 if "pdf_messages" not in st.session_state:
     st.session_state.pdf_messages = []
+
+page = st.sidebar.radio("페이지 선택", ["질문하기", "Chat", "도서관 챗봇", "ChatPDF"])
 
 # 페이지 추가: ChatPDF
 if page == "ChatPDF":
