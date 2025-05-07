@@ -145,8 +145,22 @@ if page == "ChatPDF":
 # ✅ 나머지 페이지는 비워두기
 # ----------------------
 
+# 질문하기 페이지 (간단한 질문 인터페이스)
 elif page == "질문하기":
-    st.title("질문하기 페이지 (미구현)")
+    st.title("질문하기")
+    question = st.text_input("무엇이든 질문하세요:")
+
+    if question and st.session_state.api_key:
+        try:
+            client = openai.OpenAI(api_key=st.session_state.api_key)
+            response = client.chat.completions.create(
+                model="gpt-4-0125-preview",
+                messages=[{"role": "user", "content": question}]
+            )
+            st.markdown(f"**답변:** {response.choices[0].message.content.strip()}")
+        except Exception as e:
+            st.error(f"에러 발생: {e}")
+
 
 elif page == "Chat":
     st.title("Chat 페이지 (미구현)")
