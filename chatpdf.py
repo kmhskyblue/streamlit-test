@@ -24,18 +24,6 @@ def load_library_rules():
 
 PUKYONG_LIB_RULES = load_library_rules()
 
-# 페이지 설정
-st.set_page_config(page_title="GPT 챗봇 앱", layout="centered")
-
-# API Key 입력 및 저장
-if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
-
-api_key_input = st.sidebar.text_input("OpenAI API Key", type="password", value=st.session_state.api_key)
-if api_key_input:
-    st.session_state.api_key = api_key_input
-    openai.api_key = api_key_input
-
 # ----------------------
 # 🗂 페이지 선택
 # ----------------------
