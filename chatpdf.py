@@ -162,8 +162,43 @@ elif page == "질문하기":
             st.error(f"에러 발생: {e}")
 
 
+# Chat 페이지 (자유로운 채팅)
 elif page == "Chat":
-    st.title("Chat 페이지 (미구현)")
+    st.title("Chat GPT")
+
+    if "chat_messages" not in st.session_state:
+        reset_chat("chat_messages")
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input = st.chat_input("메시지를 입력하세요")
+
+    if user_input:
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        st.session_state.chat_messages.append({"role": "user", "content": user_input})
+
+        try:
+            client = openai.OpenAI(api_key=st.session_state.api_key)
+            response = client.chat.completions.create(
+                model="gpt-4-0125-preview",
+                messages=st.session_state.chat_messages
+            )
+            reply = response.choices[0].message.content.strip()
+
+            with st.chat_message("assistant"):
+                st.markdown(reply)
+
+            st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+
+        except Exception as e:
+            st.error(f"에러 발생: {e}")
+
+    if st.button("대화 초기화"):
+        reset_chat("chat_messages")
+        st.success("대화가 초기화되었습니다.")
 
 elif page == "도서관 챗봇":
     st.title("도서관 챗봇 (미구현)")
