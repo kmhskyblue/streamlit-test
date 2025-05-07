@@ -37,7 +37,7 @@ if page == "질문하기":
         try:
             with st.spinner("GPT가 생각 중입니다..."):
                 answer = get_gpt_response(user_input, st.session_state.api_key)
-                st.markdown("####GPT의 응답:")
+                st.markdown("GPT의 응답:")
                 st.write(answer)
         except Exception as e:
             st.error(f"에러 발생: {e}")
