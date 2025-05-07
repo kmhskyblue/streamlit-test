@@ -134,3 +134,12 @@ elif page == "도서관 챗봇":
             {"role": "system", "content": f"도서관 규정 내용:\n{PUKYONG_LIB_RULES}"}
         )
         st.success("대화가 초기화되었습니다.")
+
+# app.py
+import streamlit as st
+from chatpdf import run_chatpdf
+
+page = st.sidebar.radio("페이지 선택", ["질문하기", "Chat", "도서관 챗봇", "ChatPDF"])
+
+if page == "ChatPDF":
+    run_chatpdf()
