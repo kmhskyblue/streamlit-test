@@ -117,3 +117,10 @@ if page == "ChatPDF":
                 st.success("벡터 저장소 및 대화 초기화 완료.")
             except Exception as e:
                 st.error(f"벡터 저장소 삭제 실패: {e}")
+
+# chatpdf.py
+import streamlit as st
+
+def run_chatpdf():
+    st.title("ChatPDF 페이지")
+    # ChatPDF 구현 내용 여기에 작성
