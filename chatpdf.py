@@ -24,6 +24,12 @@ def load_library_rules():
 
 PUKYONG_LIB_RULES = load_library_rules()
 
+# 공통: 대화 초기화 함수
+def reset_chat(state_key, system_prompt=None):
+    st.session_state[state_key] = []
+    if system_prompt:
+        st.session_state[state_key].append({"role": "system", "content": system_prompt})
+
 # ----------------------
 # 🗂 페이지 선택
 # ----------------------
