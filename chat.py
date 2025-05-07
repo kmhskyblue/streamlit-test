@@ -88,8 +88,8 @@ elif page == "Chat":
             st.error(f"에러 발생: {e}")
 
     # Clear 버튼
-    if st.button("대화 초기화"):
+    if st.button("🗑️ 대화 초기화"):
         st.session_state.messages = [
             {"role": "system", "content": "You are a helpful assistant."}
         ]
-        st.experimental_rerun()
+        st.success("대화가 초기화되었습니다. 새로운 메시지를 입력해보세요!")
