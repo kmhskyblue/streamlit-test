@@ -1,5 +1,5 @@
 import streamlit as st
-import openai import OpenAI
+from openai import OpenAI
 import PyPDF2
 import numpy as np
 
