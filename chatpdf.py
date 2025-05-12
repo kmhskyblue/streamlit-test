@@ -99,7 +99,7 @@ def get_single_response(prompt: str):
 # --------------------------
 # 탭 UI 구성
 # --------------------------
-tab1, tab2, tab3 = st.tabs(["🧠 Ask GPT", "💬 Chat", "📄 ChatPDF"])
+tab1, tab2, tab3, tab4 = st.tabs(["🧠 Ask GPT", "💬 Chat", "📄 ChatPDF", "📚 Chatbot"])
 
 # --------------------------
 # Tab 1: Ask GPT
@@ -175,3 +175,64 @@ with tab3:
                 answer = ask_pdf_bot(query, context)
                 st.markdown("### 📄 GPT 응답")
                 st.write(answer)
+
+# 기존 세션 상태 유지
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
+if "chatbot_history" not in st.session_state:
+    st.session_state.chatbot_history = []
+
+# 규정 내용
+pknu_library_rules = """
+제1조(목적) 이 규정은 국립부경대학교 도서관(이하 "도서관"이라 한다)의 발전계획 수립 및 시행, 직원 배치, 학술정보자료의 확보 및 이용·관리 등에 필요한 사항을 규정함을 목적으로 한다.
+
+제2조(임무) 도서관은 국내외의 학술정보자료를 수집·정리·보존하여 이를 교수, 학생 및 지역 주민의 연구·학습에 제공하는 것을 임무로 한다.
+
+제3조(조직) 도서관에는 도서관장과 사서직원 및 그 밖의 직원이 두어지며, 도서관장은 도서관의 업무를 총괄하고 도서관 운영위원회를 둔다.
+
+제4조(발전계획) 도서관장은 5년마다 발전계획을 수립하고 매년 시행계획을 수립한다.
+
+제5조(이용자격) 본교 교직원, 학생 및 특별한 허가를 받은 외부인이 이용할 수 있다.
+
+제6조(자료대출)
+① 학부생은 5책 14일간 대출할 수 있다.
+② 대학원생은 10책 30일간, 교직원은 20책 60일간 대출 가능하다.
+
+제7조(휴관일) 도서관의 휴관일은 일요일, 국정공휴일, 임시휴관일(관장이 지정)이다.
+"""
+
+# 탭 구성
+tab1, tab2, tab3, tab4 = st.tabs(["🧠 Ask GPT", "💬 Chat", "📄 ChatPDF", "📚 Chatbot"])
+
+# Chatbot 탭
+with tab4:
+    st.header("📚 국립부경대학교 도서관 챗봇")
+
+    if not st.session_state.api_key:
+        st.warning("API Key를 입력하세요.")
+    else:
+        col1, col2 = st.columns([6, 1])
+        with col2:
+            if st.button("🧹 Clear"):
+                st.session_state.chatbot_history = []
+                st.rerun()
+
+        user_q = st.chat_input("도서관에 대해 궁금한 점을 입력하세요")
+        if user_q:
+            client = OpenAI(api_key=st.session_state.api_key)
+
+            st.session_state.chatbot_history.append({"role": "user", "content": user_q})
+
+            with st.spinner("답변 생성 중..."):
+                response = client.chat.completions.create(
+                    model="gpt-4-1106-preview",
+                    messages=[
+                        {"role": "system", "content": f"다음 국립부경대학교 도서관 규정을 참고하여 질문에 답변하세요:\n{pknu_library_rules}"},
+                        *st.session_state.chatbot_history
+                    ]
+                )
+                answer = response.choices[0].message.content.strip()
+                st.session_state.chatbot_history.append({"role": "assistant", "content": answer})
+
+        for msg in st.session_state.chatbot_history:
+            st.chat_message(msg["role"]).write(msg["content"])
