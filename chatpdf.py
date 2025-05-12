@@ -1,12 +1,9 @@
 import streamlit as st
 import openai
 import PyPDF2
-import faiss
-import os
-import tempfile
+import numpy as np
 
 from typing import List
-from uuid import uuid4
 
 st.set_page_config(page_title="GPT 웹앱 with PDF Chat", layout="wide")
 
@@ -28,17 +25,14 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}
     ]
-if "pdf_index" not in st.session_state:
-    st.session_state.pdf_index = None
 if "pdf_chunks" not in st.session_state:
     st.session_state.pdf_chunks = []
 if "pdf_embeddings" not in st.session_state:
     st.session_state.pdf_embeddings = []
 
 # -------------------------------
-# 함수 정의
+# 공통 함수
 # -------------------------------
-
 def extract_text_from_pdf(file) -> str:
     pdf = PyPDF2.PdfReader(file)
     return "\n".join(page.extract_text() or "" for page in pdf.pages)
@@ -63,24 +57,22 @@ def embed_chunks(chunks: List[str], api_key: str):
         input=chunks,
         model="text-embedding-3-small"
     )
-    embeddings = [res["embedding"] for res in response["data"]]
-    return embeddings
+    return [res["embedding"] for res in response["data"]]
 
-def create_faiss_index(embeddings: List[List[float]]):
-    dim = len(embeddings[0])
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings).astype("float32"))
-    return index
+def cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-def search_index(query, chunks, index, embeddings, api_key, k=3):
+def search_similar_chunks(query, chunks, embeddings, api_key, k=3):
     openai.api_key = api_key
     query_embedding = openai.Embedding.create(
         input=[query],
         model="text-embedding-3-small"
     )["data"][0]["embedding"]
-    D, I = index.search(np.array([query_embedding]).astype("float32"), k)
-    relevant_chunks = [chunks[i] for i in I[0]]
-    return "\n\n".join(relevant_chunks)
+    sims = [cosine_similarity(query_embedding, emb) for emb in embeddings]
+    top_indices = np.argsort(sims)[::-1][:k]
+    return "\n\n".join([chunks[i] for i in top_indices])
 
 def ask_pdf_bot(query, context, api_key):
     messages = [
@@ -95,7 +87,7 @@ def ask_pdf_bot(query, context, api_key):
     return response.choices[0].message.content.strip()
 
 # -------------------------------
-# 페이지 구성
+# 탭 구성
 # -------------------------------
 tab1, tab2, tab3 = st.tabs(["🧠 Ask GPT", "💬 Chat GPT", "📄 ChatPDF"])
 
@@ -156,37 +148,31 @@ with tab2:
 
 # 3. ChatPDF
 with tab3:
-    import numpy as np
-
     st.header("📄 ChatPDF: PDF 기반 챗봇")
-    uploaded_file = st.file_uploader("PDF 파일 업로드", type=["pdf"])
 
-    if st.button("🧹 Clear PDF Vector Store"):
-        st.session_state.pdf_index = None
+    uploaded_file = st.file_uploader("PDF 파일 업로드", type=["pdf"])
+    if st.button("🧹 Clear PDF Data"):
         st.session_state.pdf_chunks = []
         st.session_state.pdf_embeddings = []
-        st.success("PDF 벡터 저장소가 초기화되었습니다.")
+        st.success("PDF 데이터 초기화 완료!")
 
     if uploaded_file and st.session_state.api_key:
-        with st.spinner("PDF를 처리 중..."):
+        with st.spinner("PDF 분석 중..."):
             text = extract_text_from_pdf(uploaded_file)
             chunks = chunk_text(text)
             embeddings = embed_chunks(chunks, st.session_state.api_key)
-            index = create_faiss_index(embeddings)
 
             st.session_state.pdf_chunks = chunks
             st.session_state.pdf_embeddings = embeddings
-            st.session_state.pdf_index = index
-            st.success(f"{len(chunks)}개 문단으로 분할하여 임베딩 완료!")
+            st.success(f"{len(chunks)}개 문단 분석 완료!")
 
-    if st.session_state.pdf_index:
+    if st.session_state.pdf_chunks:
         query = st.text_input("PDF에 대해 질문하세요")
         if query:
-            with st.spinner("질문 처리 중..."):
-                context = search_index(
+            with st.spinner("응답 생성 중..."):
+                context = search_similar_chunks(
                     query,
                     st.session_state.pdf_chunks,
-                    st.session_state.pdf_index,
                     st.session_state.pdf_embeddings,
                     st.session_state.api_key
                 )
