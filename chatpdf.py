@@ -2,219 +2,194 @@ import streamlit as st
 import openai
 import PyPDF2
 import faiss
-import numpy as np
-import tempfile
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
+import tempfile
 
-# ----------------------
-# 🔐 OpenAI API Key 설정
-# ----------------------
-st.sidebar.title("설정")
-api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+from typing import List
+from uuid import uuid4
 
-if api_key:
-    st.session_state.api_key = api_key
+st.set_page_config(page_title="GPT 웹앱 with PDF Chat", layout="wide")
+
+# -------------------------------
+# API Key 입력
+# -------------------------------
+st.sidebar.title("🔐 API Key 설정")
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
+
+api_key_input = st.sidebar.text_input("OpenAI API Key", type="password")
+if api_key_input:
+    st.session_state.api_key = api_key_input
+
+# -------------------------------
+# 세션 상태 초기화
+# -------------------------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [
+        {"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}
+    ]
+if "pdf_index" not in st.session_state:
+    st.session_state.pdf_index = None
+if "pdf_chunks" not in st.session_state:
+    st.session_state.pdf_chunks = []
+if "pdf_embeddings" not in st.session_state:
+    st.session_state.pdf_embeddings = []
+
+# -------------------------------
+# 함수 정의
+# -------------------------------
+
+def extract_text_from_pdf(file) -> str:
+    pdf = PyPDF2.PdfReader(file)
+    return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+def chunk_text(text: str, max_tokens=500) -> List[str]:
+    sentences = text.split(". ")
+    chunks = []
+    current_chunk = ""
+    for sentence in sentences:
+        if len(current_chunk + sentence) < max_tokens:
+            current_chunk += sentence + ". "
+        else:
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence + ". "
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    return chunks
+
+def embed_chunks(chunks: List[str], api_key: str):
     openai.api_key = api_key
-else:
-    st.warning("API Key를 입력하세요.")
-    st.stop()
+    response = openai.Embedding.create(
+        input=chunks,
+        model="text-embedding-3-small"
+    )
+    embeddings = [res["embedding"] for res in response["data"]]
+    return embeddings
 
-# 규정 불러오기 함수
-def load_library_rules():
-    with open("rules.txt", "r", encoding="utf-8") as f:
-        return f.read()
+def create_faiss_index(embeddings: List[List[float]]):
+    dim = len(embeddings[0])
+    index = faiss.IndexFlatL2(dim)
+    index.add(np.array(embeddings).astype("float32"))
+    return index
 
-PUKYONG_LIB_RULES = load_library_rules()
+def search_index(query, chunks, index, embeddings, api_key, k=3):
+    openai.api_key = api_key
+    query_embedding = openai.Embedding.create(
+        input=[query],
+        model="text-embedding-3-small"
+    )["data"][0]["embedding"]
+    D, I = index.search(np.array([query_embedding]).astype("float32"), k)
+    relevant_chunks = [chunks[i] for i in I[0]]
+    return "\n\n".join(relevant_chunks)
 
-# 공통: 대화 초기화 함수
-def reset_chat(state_key, system_prompt=None):
-    st.session_state[state_key] = []
-    if system_prompt:
-        st.session_state[state_key].append({"role": "system", "content": system_prompt})
+def ask_pdf_bot(query, context, api_key):
+    messages = [
+        {"role": "system", "content": "다음 문서를 참고하여 질문에 답하세요:\n" + context},
+        {"role": "user", "content": query}
+    ]
+    openai.api_key = api_key
+    response = openai.ChatCompletion.create(
+        model="gpt-4-1106-preview",
+        messages=messages
+    )
+    return response.choices[0].message.content.strip()
 
-# ----------------------
-# 🗂 페이지 선택
-# ----------------------
-page = st.sidebar.radio("페이지 선택", ["질문하기", "Chat", "도서관 챗봇", "ChatPDF"])
+# -------------------------------
+# 페이지 구성
+# -------------------------------
+tab1, tab2, tab3 = st.tabs(["🧠 Ask GPT", "💬 Chat GPT", "📄 ChatPDF"])
 
-# ----------------------
-# 📄 ChatPDF 페이지 구현
-# ----------------------
+# 1. Ask GPT
+with tab1:
+    st.header("🧠 GPT에 질문하기")
 
-if page == "ChatPDF":
-if "pdf_messages" not in st.session_state:
-    st.session_state.pdf_messages = []
+    @st.cache_data(show_spinner=False)
+    def get_single_response(prompt, api_key):
+        openai.api_key = api_key
+        response = openai.ChatCompletion.create(
+            model="gpt-4-1106-preview",
+            messages=[
+                {"role": "system", "content": "당신은 친절한 AI 비서입니다."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content.strip()
 
-if page == "ChatPDF":
-    st.title("📄 ChatPDF - PDF 문서 기반 챗봇")
+    if not st.session_state.api_key:
+        st.warning("API Key를 입력하세요.")
+    else:
+        question = st.text_input("질문을 입력하세요")
+        if question:
+            with st.spinner("GPT 응답 생성 중..."):
+                answer = get_single_response(question, st.session_state.api_key)
+                st.markdown("### ✅ GPT 응답")
+                st.write(answer)
 
-    uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type="pdf")
+# 2. Chat GPT
+with tab2:
+    st.header("💬 GPT와 대화하기")
+    col1, col2 = st.columns([6, 1])
+    with col2:
+        if st.button("🧹 Clear Chat"):
+            st.session_state.chat_history = [
+                {"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}
+            ]
+            st.rerun()
 
-    if uploaded_file:
-        # 임시 파일로 저장
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            pdf_path = tmp_file.name
-
-        # PDF에서 텍스트 추출
-        text = ""
-        with open(pdf_path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                text += page.extract_text()
-
-        # 텍스트 벡터화
-        vectorizer = TfidfVectorizer()
-        vectors = vectorizer.fit_transform([text])
-
-        # FAISS를 이용해 벡터 저장소 구성
-        dim = vectors.shape[1]
-        index = faiss.IndexFlatL2(dim)
-        faiss_index = np.array(vectors.toarray(), dtype=np.float32)
-        index.add(faiss_index)
-
-        st.success("PDF 업로드 및 벡터 저장소 구성 완료!")
-
-        # 사용자의 질문 받기
-        user_input = st.text_input("PDF 내용에 대해 질문해 보세요")
-
+    if not st.session_state.api_key:
+        st.warning("API Key를 입력하세요.")
+    else:
+        user_input = st.chat_input("메시지를 입력하세요")
         if user_input:
-            with st.chat_message("user"):
-                st.markdown(user_input)
-            st.session_state.pdf_messages.append({"role": "user", "content": user_input})
+            st.session_state.chat_history.append({"role": "user", "content": user_input})
+            with st.spinner("GPT 응답 중..."):
+                openai.api_key = st.session_state.api_key
+                response = openai.ChatCompletion.create(
+                    model="gpt-4-1106-preview",
+                    messages=st.session_state.chat_history
+                )
+                reply = response.choices[0].message.content.strip()
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-            # 사용자의 질문 벡터화
-            question_vector = vectorizer.transform([user_input]).toarray().astype(np.float32)
+        for msg in st.session_state.chat_history[1:]:
+            st.chat_message(msg["role"]).write(msg["content"])
 
-            # FAISS를 통해 유사도 높은 벡터 검색
-            D, I = index.search(question_vector, k=1)
-            best_match = text  # 가장 가까운 문서
+# 3. ChatPDF
+with tab3:
+    import numpy as np
 
-            # OpenAI 모델을 사용하여 질문에 답변
-            response = openai.Completion.create(
-                model="text-davinci-003",  # 또는 GPT-4 사용
-                prompt=f"Q: {user_input}\nA: {best_match}",
-                max_tokens=150
-            )
+    st.header("📄 ChatPDF: PDF 기반 챗봇")
+    uploaded_file = st.file_uploader("PDF 파일 업로드", type=["pdf"])
 
-            answer = response.choices[0].text.strip()
+    if st.button("🧹 Clear PDF Vector Store"):
+        st.session_state.pdf_index = None
+        st.session_state.pdf_chunks = []
+        st.session_state.pdf_embeddings = []
+        st.success("PDF 벡터 저장소가 초기화되었습니다.")
 
-            with st.chat_message("assistant"):
-                st.markdown(answer)
-            st.session_state.pdf_messages.append({"role": "assistant", "content": answer})
+    if uploaded_file and st.session_state.api_key:
+        with st.spinner("PDF를 처리 중..."):
+            text = extract_text_from_pdf(uploaded_file)
+            chunks = chunk_text(text)
+            embeddings = embed_chunks(chunks, st.session_state.api_key)
+            index = create_faiss_index(embeddings)
 
-        # 임시 파일 삭제
-        os.remove(pdf_path)
+            st.session_state.pdf_chunks = chunks
+            st.session_state.pdf_embeddings = embeddings
+            st.session_state.pdf_index = index
+            st.success(f"{len(chunks)}개 문단으로 분할하여 임베딩 완료!")
 
-    # 벡터 스토어 초기화 (Clear 버튼)
-    if st.button("Clear"):
-        st.session_state.pdf_messages = []
-        st.success("대화 및 벡터 저장소 초기화 완료")
-
-# 질문하기 페이지 (간단한 질문 인터페이스)
-elif page == "질문하기":
-    st.title("질문하기")
-    question = st.text_input("무엇이든 질문하세요:")
-
-    if question and st.session_state.api_key:
-        try:
-            client = openai.OpenAI(api_key=st.session_state.api_key)
-            response = client.chat.completions.create(
-                model="gpt-4-0125-preview",
-                messages=[{"role": "user", "content": question}]
-            )
-            st.markdown(f"**답변:** {response.choices[0].message.content.strip()}")
-        except Exception as e:
-            st.error(f"에러 발생: {e}")
-
-
-# Chat 페이지 (자유로운 채팅)
-elif page == "Chat":
-    st.title("Chat GPT")
-
-    if "chat_messages" not in st.session_state:
-        reset_chat("chat_messages")
-
-    for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    user_input = st.chat_input("메시지를 입력하세요")
-
-    if user_input:
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        st.session_state.chat_messages.append({"role": "user", "content": user_input})
-
-        try:
-            client = openai.OpenAI(api_key=st.session_state.api_key)
-            response = client.chat.completions.create(
-                model="gpt-4-0125-preview",
-                messages=st.session_state.chat_messages
-            )
-            reply = response.choices[0].message.content.strip()
-
-            with st.chat_message("assistant"):
-                st.markdown(reply)
-
-            st.session_state.chat_messages.append({"role": "assistant", "content": reply})
-
-        except Exception as e:
-            st.error(f"에러 발생: {e}")
-
-    if st.button("대화 초기화"):
-        reset_chat("chat_messages")
-        st.success("대화가 초기화되었습니다.")
-
-# 도서관 챗봇 페이지
-elif page == "도서관 챗봇":
-    st.title("국립부경대학교 도서관 챗봇")
-
-    if "lib_messages" not in st.session_state:
-        reset_chat("lib_messages")
-        st.session_state.lib_messages.append(
-            {"role": "system", "content": "너는 국립부경대학교 도서관 규정을 안내하는 도우미야. 사용자 질문에 도서관 규정에 따라 성실히 답변해줘."}
-        )
-        st.session_state.lib_messages.append(
-            {"role": "system", "content": f"도서관 규정 내용:\n{PUKYONG_LIB_RULES}"}
-        )
-
-    for msg in st.session_state.lib_messages[2:]:
-        with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-            st.markdown(msg["content"])
-
-    user_input = st.chat_input("도서관 관련 질문을 입력하세요")
-
-    if user_input:
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        st.session_state.lib_messages.append({"role": "user", "content": user_input})
-
-        try:
-            client = openai.OpenAI(api_key=st.session_state.api_key)
-            response = client.chat.completions.create(
-                model="gpt-4-0125-preview",
-                messages=st.session_state.lib_messages,
-                temperature=0.5
-            )
-            reply = response.choices[0].message.content.strip()
-
-            with st.chat_message("assistant"):
-                st.markdown(reply)
-
-            st.session_state.lib_messages.append({"role": "assistant", "content": reply})
-
-        except Exception as e:
-            st.error(f"에러 발생: {e}")
-
-    if st.button("대화 초기화"):
-        reset_chat("lib_messages")
-        st.session_state.lib_messages.append(
-            {"role": "system", "content": "너는 국립부경대학교 도서관 규정을 안내하는 도우미야. 사용자 질문에 도서관 규정에 따라 성실히 답변해줘."}
-        )
-        st.session_state.lib_messages.append(
-            {"role": "system", "content": f"도서관 규정 내용:\n{PUKYONG_LIB_RULES}"}
-        )
-        st.success("대화가 초기화되었습니다.")
+    if st.session_state.pdf_index:
+        query = st.text_input("PDF에 대해 질문하세요")
+        if query:
+            with st.spinner("질문 처리 중..."):
+                context = search_index(
+                    query,
+                    st.session_state.pdf_chunks,
+                    st.session_state.pdf_index,
+                    st.session_state.pdf_embeddings,
+                    st.session_state.api_key
+                )
+                answer = ask_pdf_bot(query, context, st.session_state.api_key)
+                st.markdown("### 📄 GPT 응답")
+                st.write(answer)
