@@ -130,7 +130,7 @@ with tab2:
     else:
         col1, col2 = st.columns([6, 1])
         with col2:
-            if st.button("🧹 Clear"):
+            if st.button("🧹 Clear", key="clear_button_chat"):
                 st.session_state.chat_history = [{"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}]
                 st.rerun()
 
@@ -156,7 +156,7 @@ with tab3:
     st.header("📄 PDF 업로드 후 질문하기")
 
     uploaded_file = st.file_uploader("PDF 파일 업로드", type="pdf")
-    if st.button("🧹 Clear PDF"):
+    if st.button("🧹 Clear PDF", key="clear_button_chatpdf"):
         st.session_state.pdf_chunks = []
         st.session_state.pdf_embeddings = []
         st.success("PDF 데이터가 초기화되었습니다.")
@@ -195,7 +195,7 @@ with tab4:
     else:
         col1, col2 = st.columns([6, 1])
         with col2:
-            if st.button("🧹 Clear"):
+            if st.button("🧹 Clear", key="clear_button_chatbot"):
                 st.session_state.chatbot_history = []
                 st.rerun()
 
