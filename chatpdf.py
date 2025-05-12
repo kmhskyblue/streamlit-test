@@ -2,14 +2,13 @@ import streamlit as st
 from openai import OpenAI
 import PyPDF2
 import numpy as np
-
 from typing import List
 
-st.set_page_config(page_title="GPT 웹앱 with PDF Chat", layout="wide")
+st.set_page_config(page_title="GPT 웹앱", layout="wide")
 
-# -------------------------------
+# --------------------------
 # API Key 입력
-# -------------------------------
+# --------------------------
 st.sidebar.title("🔐 API Key 설정")
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
@@ -18,164 +17,161 @@ api_key_input = st.sidebar.text_input("OpenAI API Key", type="password")
 if api_key_input:
     st.session_state.api_key = api_key_input
 
-# -------------------------------
+# --------------------------
 # 세션 상태 초기화
-# -------------------------------
+# --------------------------
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [
-        {"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}
-    ]
+    st.session_state.chat_history = [{"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}]
 if "pdf_chunks" not in st.session_state:
     st.session_state.pdf_chunks = []
 if "pdf_embeddings" not in st.session_state:
     st.session_state.pdf_embeddings = []
 
-# -------------------------------
-# 공통 함수
-# -------------------------------
+# --------------------------
+# 유틸 함수들
+# --------------------------
+def get_client():
+    return OpenAI(api_key=st.session_state.api_key)
+
 def extract_text_from_pdf(file) -> str:
-    pdf = PyPDF2.PdfReader(file)
-    return "\n".join(page.extract_text() or "" for page in pdf.pages)
+    reader = PyPDF2.PdfReader(file)
+    return "\n".join([page.extract_text() or "" for page in reader.pages])
 
 def chunk_text(text: str, max_tokens=500) -> List[str]:
     sentences = text.split(". ")
     chunks = []
-    current_chunk = ""
+    chunk = ""
     for sentence in sentences:
-        if len(current_chunk + sentence) < max_tokens:
-            current_chunk += sentence + ". "
+        if len(chunk + sentence) < max_tokens:
+            chunk += sentence + ". "
         else:
-            chunks.append(current_chunk.strip())
-            current_chunk = sentence + ". "
-    if current_chunk:
-        chunks.append(current_chunk.strip())
+            chunks.append(chunk.strip())
+            chunk = sentence + ". "
+    if chunk:
+        chunks.append(chunk.strip())
     return chunks
 
-def embed_chunks(chunks: List[str], api_key: str):
-    openai.api_key = api_key
-    response = openai.Embedding.create(
+def embed_chunks(chunks: List[str]):
+    client = get_client()
+    response = client.embeddings.create(
         input=chunks,
         model="text-embedding-3-small"
     )
-    return [res["embedding"] for res in response["data"]]
+    return [item.embedding for item in response.data]
 
 def cosine_similarity(a, b):
     a = np.array(a)
     b = np.array(b)
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-def search_similar_chunks(query, chunks, embeddings, api_key, k=3):
-    openai.api_key = api_key
-    query_embedding = openai.Embedding.create(
+def search_similar_chunks(query: str, chunks: List[str], embeddings: List[List[float]], k=3):
+    client = get_client()
+    query_embedding = client.embeddings.create(
         input=[query],
         model="text-embedding-3-small"
-    )["data"][0]["embedding"]
-    sims = [cosine_similarity(query_embedding, emb) for emb in embeddings]
-    top_indices = np.argsort(sims)[::-1][:k]
+    ).data[0].embedding
+    similarities = [cosine_similarity(query_embedding, emb) for emb in embeddings]
+    top_indices = np.argsort(similarities)[::-1][:k]
     return "\n\n".join([chunks[i] for i in top_indices])
 
-def ask_pdf_bot(query, context, api_key):
-    messages = [
-        {"role": "system", "content": "다음 문서를 참고하여 질문에 답하세요:\n" + context},
-        {"role": "user", "content": query}
-    ]
-    openai.api_key = api_key
-    response = openai.ChatCompletion.create(
+def ask_pdf_bot(query: str, context: str):
+    client = get_client()
+    response = client.chat.completions.create(
         model="gpt-4-1106-preview",
-        messages=messages
+        messages=[
+            {"role": "system", "content": "다음 문서를 참고하여 질문에 답하세요:\n" + context},
+            {"role": "user", "content": query}
+        ]
     )
     return response.choices[0].message.content.strip()
 
-# -------------------------------
-# 탭 구성
-# -------------------------------
-tab1, tab2, tab3 = st.tabs(["🧠 Ask GPT", "💬 Chat GPT", "📄 ChatPDF"])
+def get_single_response(prompt: str):
+    client = get_client()
+    response = client.chat.completions.create(
+        model="gpt-4-1106-preview",
+        messages=[
+            {"role": "system", "content": "당신은 친절한 AI 비서입니다."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response.choices[0].message.content.strip()
 
-# 1. Ask GPT
+# --------------------------
+# 탭 UI 구성
+# --------------------------
+tab1, tab2, tab3 = st.tabs(["🧠 Ask GPT", "💬 Chat", "📄 ChatPDF"])
+
+# --------------------------
+# Tab 1: Ask GPT
+# --------------------------
 with tab1:
-    st.header("🧠 GPT에 질문하기")
-
-    @st.cache_data(show_spinner=False)
-    def get_single_response(prompt, api_key):
-        openai.api_key = api_key
-        response = openai.ChatCompletion.create(
-            model="gpt-4-1106-preview",
-            messages=[
-                {"role": "system", "content": "당신은 친절한 AI 비서입니다."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.choices[0].message.content.strip()
-
+    st.header("🧠 GPT에 단일 질문")
     if not st.session_state.api_key:
-        st.warning("API Key를 입력하세요.")
+        st.warning("API Key를 먼저 입력하세요.")
     else:
-        question = st.text_input("질문을 입력하세요")
-        if question:
+        user_prompt = st.text_input("질문을 입력하세요:")
+        if user_prompt:
             with st.spinner("GPT 응답 생성 중..."):
-                answer = get_single_response(question, st.session_state.api_key)
+                response = get_single_response(user_prompt)
                 st.markdown("### ✅ GPT 응답")
-                st.write(answer)
+                st.write(response)
 
-# 2. Chat GPT
+# --------------------------
+# Tab 2: Chat
+# --------------------------
 with tab2:
     st.header("💬 GPT와 대화하기")
-    col1, col2 = st.columns([6, 1])
-    with col2:
-        if st.button("🧹 Clear Chat"):
-            st.session_state.chat_history = [
-                {"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}
-            ]
-            st.rerun()
-
     if not st.session_state.api_key:
-        st.warning("API Key를 입력하세요.")
+        st.warning("API Key를 먼저 입력하세요.")
     else:
-        user_input = st.chat_input("메시지를 입력하세요")
-        if user_input:
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            with st.spinner("GPT 응답 중..."):
-                openai.api_key = st.session_state.api_key
-                response = openai.ChatCompletion.create(
+        col1, col2 = st.columns([6, 1])
+        with col2:
+            if st.button("🧹 Clear"):
+                st.session_state.chat_history = [{"role": "system", "content": "당신은 친절한 AI 챗봇입니다."}]
+                st.rerun()
+
+        user_msg = st.chat_input("메시지를 입력하세요")
+        if user_msg:
+            st.session_state.chat_history.append({"role": "user", "content": user_msg})
+            with st.spinner("응답 중..."):
+                client = get_client()
+                res = client.chat.completions.create(
                     model="gpt-4-1106-preview",
                     messages=st.session_state.chat_history
                 )
-                reply = response.choices[0].message.content.strip()
+                reply = res.choices[0].message.content.strip()
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
         for msg in st.session_state.chat_history[1:]:
             st.chat_message(msg["role"]).write(msg["content"])
 
-# 3. ChatPDF
+# --------------------------
+# Tab 3: ChatPDF
+# --------------------------
 with tab3:
-    st.header("📄 ChatPDF: PDF 기반 챗봇")
+    st.header("📄 PDF 업로드 후 질문하기")
 
-    uploaded_file = st.file_uploader("PDF 파일 업로드", type=["pdf"])
-    if st.button("🧹 Clear PDF Data"):
+    uploaded_file = st.file_uploader("PDF 파일 업로드", type="pdf")
+    if st.button("🧹 Clear PDF"):
         st.session_state.pdf_chunks = []
         st.session_state.pdf_embeddings = []
-        st.success("PDF 데이터 초기화 완료!")
+        st.success("PDF 데이터가 초기화되었습니다.")
 
     if uploaded_file and st.session_state.api_key:
         with st.spinner("PDF 분석 중..."):
-            text = extract_text_from_pdf(uploaded_file)
-            chunks = chunk_text(text)
-            embeddings = embed_chunks(chunks, st.session_state.api_key)
+            raw_text = extract_text_from_pdf(uploaded_file)
+            chunks = chunk_text(raw_text)
+            embeddings = embed_chunks(chunks)
 
             st.session_state.pdf_chunks = chunks
             st.session_state.pdf_embeddings = embeddings
-            st.success(f"{len(chunks)}개 문단 분석 완료!")
+            st.success(f"{len(chunks)}개의 청크로 분할 및 임베딩 완료!")
 
     if st.session_state.pdf_chunks:
-        query = st.text_input("PDF에 대해 질문하세요")
+        query = st.text_input("PDF 내용 기반 질문을 입력하세요:")
         if query:
             with st.spinner("응답 생성 중..."):
-                context = search_similar_chunks(
-                    query,
-                    st.session_state.pdf_chunks,
-                    st.session_state.pdf_embeddings,
-                    st.session_state.api_key
-                )
-                answer = ask_pdf_bot(query, context, st.session_state.api_key)
+                context = search_similar_chunks(query, st.session_state.pdf_chunks, st.session_state.pdf_embeddings)
+                answer = ask_pdf_bot(query, context)
                 st.markdown("### 📄 GPT 응답")
                 st.write(answer)
