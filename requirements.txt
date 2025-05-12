@@ -1,3 +1,4 @@
 streamlit
 openai
 PyPDF2
+numpy
