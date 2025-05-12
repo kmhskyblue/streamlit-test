@@ -26,6 +26,10 @@ if "pdf_chunks" not in st.session_state:
     st.session_state.pdf_chunks = []
 if "pdf_embeddings" not in st.session_state:
     st.session_state.pdf_embeddings = []
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
+if "chatbot_history" not in st.session_state:
+    st.session_state.chatbot_history = []
 
 # --------------------------
 # 유틸 함수들
