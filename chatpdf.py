@@ -186,7 +186,9 @@ def load_rules():
 
 library_rules = load_rules()
 
-# Chatbot 탭
+# --------------------------
+# Tab 4: Chatbot
+# --------------------------
 with tab4:
     st.header("📚 국립부경대학교 도서관 챗봇")
 
