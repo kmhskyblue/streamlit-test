@@ -57,8 +57,12 @@ def chunk_text(text: str, max_tokens=500) -> List[str]:
 
 def embed_chunks(chunks: List[str]):
     client = get_client()
+    # 빈 문자열, None 제거
+    clean_chunks = [chunk for chunk in chunks if isinstance(chunk, str) and chunk.strip()]
+    if not clean_chunks:
+        raise ValueError("입력할 유효한 텍스트 청크가 없습니다.")
     response = client.embeddings.create(
-        input=chunks,
+        input=clean_chunks,
         model="text-embedding-3-small"
     )
     return [item.embedding for item in response.data]
@@ -69,11 +73,15 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 def search_similar_chunks(query: str, chunks: List[str], embeddings: List[List[float]], k=3):
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("Query는 비어있거나 유효하지 않습니다.")
+    
     client = get_client()
     query_embedding = client.embeddings.create(
         input=[query],
         model="text-embedding-3-small"
     ).data[0].embedding
+    
     similarities = [cosine_similarity(query_embedding, emb) for emb in embeddings]
     top_indices = np.argsort(similarities)[::-1][:k]
     return "\n\n".join([chunks[i] for i in top_indices])
